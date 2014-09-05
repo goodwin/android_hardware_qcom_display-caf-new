@@ -577,6 +577,16 @@ int getYUVPlaneInfo(private_handle_t* hnd, struct android_ycbcr* ycbcr)
         break;
 
         case HAL_PIXEL_FORMAT_YCrCb_420_SP:
+#ifdef HAMMERHEAD_PIXEL_FORMAT
+	    ystride = ALIGN(hnd->width, 16);
+	    ycbcr->y  = (void*)hnd->base;
+	    ycbcr->cr = (void*)(hnd->base + ystride * hnd->height);
+	    ycbcr->cb = (void*)(hnd->base + ystride * hnd->height + 1);
+	    ycbcr->ystride = ystride;
+	    ycbcr->cstride = ystride;
+	    ycbcr->chroma_step = 2;
+	break;
+#endif
         case HAL_PIXEL_FORMAT_YCrCb_422_SP:
         case HAL_PIXEL_FORMAT_YCrCb_420_SP_ADRENO:
         case HAL_PIXEL_FORMAT_NV21_ZSL:

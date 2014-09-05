@@ -36,6 +36,10 @@ endif
 common_deps  :=
 kernel_includes :=
 
+ifeq ($(TARGET_DEVICE),hammerhead)
+    common_flags += -DHAMMERHEAD_PIXEL_FORMAT
+endif
+
 # Executed only on QCOM BSPs
 ifeq ($(TARGET_USES_QCOM_BSP),true)
 # Enable QCOM Display features

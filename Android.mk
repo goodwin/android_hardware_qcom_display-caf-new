@@ -1,6 +1,12 @@
 ifeq ($(TARGET_QCOM_DISPLAY_VARIANT),caf-new)
 
-display-hals := libgralloc libgenlock libcopybit libvirtual
+ifeq ($(TARGET_HAVE_NEW_GRALLOC),true)
+    display-hals := libgralloc
+else
+    display-hals := libgralloc-compat
+endif
+
+display-hals += libcopybit libvirtual
 display-hals += libhwcomposer liboverlay libqdutils libexternal libqservice
 display-hals += libmemtrack
 

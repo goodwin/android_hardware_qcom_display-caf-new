@@ -43,7 +43,9 @@ struct private_module_t {
     uint32_t numBuffers;
     size_t   bufferMask;
     pthread_mutex_t lock;
+    private_handle_t *currentBuffer;
     struct fb_var_screeninfo info;
+    struct mdp_display_commit commit;
     struct fb_fix_screeninfo finfo;
     float xdpi;
     float ydpi;

@@ -37,26 +37,41 @@ namespace qdutils {
 
 #define TOKEN_PARAMS_DELIM  "="
 
-#ifndef MDSS_MDP_REV
-enum mdp_rev {
-    MDSS_MDP_HW_REV_100 = 0x10000000, //8974 v1
-    MDSS_MDP_HW_REV_101 = 0x10010000, //8x26
-    MDSS_MDP_HW_REV_102 = 0x10020000, //8974 v2
-    MDSS_MDP_HW_REV_103 = 0x10030000, //8084
-    MDSS_MDP_HW_REV_104 = 0x10040000, //Next version
-    MDSS_MDP_HW_REV_105 = 0x10050000, //Next version
-    MDSS_MDP_HW_REV_106 = 0x10060000, //8x16
-    MDSS_MDP_HW_REV_107 = 0x10070000, //Next version
-    MDSS_MDP_HW_REV_200 = 0x20000000, //8092
-    MDSS_MDP_HW_REV_206 = 0x20060000, //Future
-};
-#else
-enum mdp_rev {
-    MDSS_MDP_HW_REV_104 = 0x10040000, //Next version
-    MDSS_MDP_HW_REV_106 = 0x10060000, //8x16
-    MDSS_MDP_HW_REV_206 = 0x20060000, //Future
-    MDSS_MDP_HW_REV_107 = 0x10070000, //Next version
-};
+#ifndef MDSS_MDP_HW_REV_100
+#define MDSS_MDP_HW_REV_100 0x10000000 //8974 v1
+#endif
+#ifndef MDSS_MDP_HW_REV_101
+#define MDSS_MDP_HW_REV_101 0x10010000 //8x26
+#endif
+#ifndef MDSS_MDP_HW_REV_102
+#define MDSS_MDP_HW_REV_102 0x10020000 //8974 v2
+#endif
+#ifndef MDSS_MDP_HW_REV_103
+#define MDSS_MDP_HW_REV_103 0x10030000 //8084
+#endif
+#ifndef MDSS_MDP_HW_REV_104
+#define MDSS_MDP_HW_REV_104 0x10040000 //Next version
+#endif
+#ifndef MDSS_MDP_HW_REV_105
+#define MDSS_MDP_HW_REV_105 0x10050000 //Next version
+#endif
+#ifndef MDSS_MDP_HW_REV_106
+#define MDSS_MDP_HW_REV_106 0x10060000 //8x16
+#endif
+#ifndef MDSS_MDP_HW_REV_107
+#define MDSS_MDP_HW_REV_107 0x10070000 //Next version
+#endif
+#ifndef MDSS_MDP_HW_REV_108
+#define MDSS_MDP_HW_REV_108 0x10080000 //8x39 & 8x36
+#endif
+#ifndef MDSS_MDP_HW_REV_109
+#define MDSS_MDP_HW_REV_109 0x10090000 //Next version
+#endif
+#ifndef MDSS_MDP_HW_REV_200
+#define MDSS_MDP_HW_REV_200 0x20000000 //8092
+#endif
+#ifndef MDSS_MDP_HW_REV_206
+#define MDSS_MDP_HW_REV_206 0x20060000 //Future
 #endif
 
 MDPVersion::MDPVersion()
@@ -67,14 +82,19 @@ MDPVersion::MDPVersion()
     mVGPipes = 0;
     mDMAPipes = 0;
     mFeatures = 0;
-    mMDPUpscale = 0;
-    mMDPDownscale = 0;
+    mMDPUpscale = 1;
+    mMDPDownscale = 1;
     mMacroTileEnabled = false;
     mLowBw = 0;
     mHighBw = 0;
     mSourceSplit = false;
     mSourceSplitAlways = false;
     mRGBHasNoScalar = false;
+    mRotDownscale = false;
+
+    // this is the default limit of mixer unless driver reports it.
+    // For resolutions beyond this, we use dual/split overlay pipes.
+    mMaxMixerWidth = 2048;
 
     updatePanelInfo();
 
@@ -122,7 +142,6 @@ void  MDPVersion::updatePanelInfo() {
     FILE *panelInfoNodeFP = NULL;
     const int MAX_FRAME_BUFFER_NAME_SIZE = 128;
     char fbType[MAX_FRAME_BUFFER_NAME_SIZE];
-    char panelInfo[MAX_FRAME_BUFFER_NAME_SIZE];
     const char *strCmdPanel = "mipi dsi cmd panel";
     const char *strVideoPanel = "mipi dsi video panel";
     const char *strLVDSPanel = "lvds panel";
@@ -264,26 +283,29 @@ bool MDPVersion::updateSysFsInfo() {
                 } else if(!strncmp(tokens[0], "max_bandwidth_high",
                         strlen("max_bandwidth_high"))) {
                     mHighBw = atol(tokens[1]);
+                } else if(!strncmp(tokens[0], "max_mixer_width",
+                        strlen("max_mixer_width"))) {
+                    mMaxMixerWidth = atoi(tokens[1]);
                 } else if(!strncmp(tokens[0], "features", strlen("features"))) {
                     for(int i=1; i<index;i++) {
                         if(!strncmp(tokens[i], "bwc", strlen("bwc"))) {
                            mFeatures |= MDP_BWC_EN;
-                        }
-                        else if(!strncmp(tokens[i], "decimation",
+                        } else if(!strncmp(tokens[i], "decimation",
                                     strlen("decimation"))) {
                            mFeatures |= MDP_DECIMATION_EN;
-                        }
-                        else if(!strncmp(tokens[i], "tile_format",
+                        } else if(!strncmp(tokens[i], "tile_format",
                                     strlen("tile_format"))) {
                            if(enableMacroTile)
                                mMacroTileEnabled = true;
                         } else if(!strncmp(tokens[i], "src_split",
                                     strlen("src_split"))) {
                             mSourceSplit = true;
-                        }
-                        else if(!strncmp(tokens[i], "non_scalar_rgb",
+                        } else if(!strncmp(tokens[i], "non_scalar_rgb",
                                     strlen("non_scalar_rgb"))) {
                             mRGBHasNoScalar = true;
+                        } else if(!strncmp(tokens[i], "rotator_downscale",
+                                    strlen("rotator_downscale"))) {
+                            mRotDownscale = true;
                         }
                     }
                 }
@@ -291,6 +313,10 @@ bool MDPVersion::updateSysFsInfo() {
         }
         free(line);
         fclose(sysfsFd);
+    }
+
+    if(mMDPVersion >= qdutils::MDP_V4_2 and mMDPVersion < qdutils::MDSS_V5) {
+        mRotDownscale = true;
     }
 
     if(mSourceSplit) {
@@ -413,6 +439,12 @@ bool MDPVersion::is8x16() {
     return (mMdpRev >= MDSS_MDP_HW_REV_106 and
             mMdpRev < MDSS_MDP_HW_REV_107);
 }
+
+bool MDPVersion::is8x39() {
+    return (mMdpRev >= MDSS_MDP_HW_REV_108 and
+            mMdpRev < MDSS_MDP_HW_REV_109);
+}
+
 
 }; //namespace qdutils
 

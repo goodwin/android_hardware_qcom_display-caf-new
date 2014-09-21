@@ -147,7 +147,8 @@ static void setDMAState(hwc_context_t *ctx, int numDisplays,
                      * to BLOCK_MODE */
 
                     if (canUseRotator(ctx, dpy) &&
-                        has90Transform(layer) && isRotationDoable(ctx, hnd)) {
+                        (has90Transform(layer) || getRotDownscale(ctx, layer))
+                        && isRotationDoable(ctx, hnd)) {
                         if(not ctx->mOverlay->isDMAMultiplexingSupported()) {
                             if(ctx->mOverlay->isPipeTypeAttached(
                                              overlay::utils::OV_MDP_PIPE_DMA))
@@ -335,9 +336,9 @@ static int hwc_prepare(hwc_composer_device_1 *dev, size_t numDisplays,
 
     //Will be unlocked at the end of set
     ctx->mDrawLock.lock();
-    setPaddingRound(ctx,numDisplays,displays);
-    setDMAState(ctx,numDisplays,displays);
-    setNumActiveDisplays(ctx,numDisplays,displays);
+    setPaddingRound(ctx, (int)numDisplays, displays);
+    setDMAState(ctx, (int)numDisplays, displays);
+    setNumActiveDisplays(ctx, (int)numDisplays, displays);
     reset(ctx, (int)numDisplays, displays);
 
     ctx->mOverlay->configBegin();
@@ -549,7 +550,8 @@ static int hwc_query(struct hwc_composer_device_1* dev,
         if(ctx->mMDP.hasOverlay) {
             supported |= HWC_DISPLAY_VIRTUAL_BIT;
             if(!(qdutils::MDPVersion::getInstance().is8x26() ||
-                        qdutils::MDPVersion::getInstance().is8x16()))
+                        qdutils::MDPVersion::getInstance().is8x16() ||
+                        qdutils::MDPVersion::getInstance().is8x39()))
                 supported |= HWC_DISPLAY_EXTERNAL_BIT;
         }
         value[0] = supported;
@@ -604,6 +606,12 @@ static int hwc_set_primary(hwc_context_t *ctx, hwc_display_contents_1_t* list) {
             hnd = ctx->mCopyBit[dpy]->getCurrentRenderBuffer();
         }
 
+        if(isAbcInUse(ctx) == true) {
+            int index = ctx->listStats[dpy].renderBufIndexforABC;
+            hwc_layer_1_t *tempLayer = &list->hwLayers[index];
+            hnd = (private_handle_t *)tempLayer->handle;
+        }
+
         if(hnd) {
             if (!ctx->mFBUpdate[dpy]->draw(ctx, hnd)) {
                 ALOGE("%s: FBUpdate draw failed", __FUNCTION__);
@@ -612,17 +620,17 @@ static int hwc_set_primary(hwc_context_t *ctx, hwc_display_contents_1_t* list) {
         }
 
         int lSplit = getLeftSplit(ctx, dpy);
-        qhwc::ovutils::Dim lRoi = qhwc::ovutils::Dim {
+        qhwc::ovutils::Dim lRoi = qhwc::ovutils::Dim(
             ctx->listStats[dpy].lRoi.left,
             ctx->listStats[dpy].lRoi.top,
             ctx->listStats[dpy].lRoi.right - ctx->listStats[dpy].lRoi.left,
-            ctx->listStats[dpy].lRoi.bottom - ctx->listStats[dpy].lRoi.top };
+            ctx->listStats[dpy].lRoi.bottom - ctx->listStats[dpy].lRoi.top);
 
-        qhwc::ovutils::Dim rRoi = qhwc::ovutils::Dim {
+        qhwc::ovutils::Dim rRoi = qhwc::ovutils::Dim(
             ctx->listStats[dpy].rRoi.left - lSplit,
             ctx->listStats[dpy].rRoi.top,
             ctx->listStats[dpy].rRoi.right - ctx->listStats[dpy].rRoi.left,
-            ctx->listStats[dpy].rRoi.bottom - ctx->listStats[dpy].rRoi.top };
+            ctx->listStats[dpy].rRoi.bottom - ctx->listStats[dpy].rRoi.top);
 
         if(!Overlay::displayCommit(ctx->dpyAttr[dpy].fd, lRoi, rRoi)) {
             ALOGE("%s: display commit fail for %d dpy!", __FUNCTION__, dpy);
@@ -666,18 +674,12 @@ static int hwc_set_external(hwc_context_t *ctx,
             ret = -1;
         }
 
-        int extOnlyLayerIndex =
-                ctx->listStats[dpy].extOnlyLayerIndex;
-
         private_handle_t *hnd = (private_handle_t *)fbLayer->handle;
-        if(extOnlyLayerIndex!= -1) {
-            hwc_layer_1_t *extLayer = &list->hwLayers[extOnlyLayerIndex];
-            hnd = (private_handle_t *)extLayer->handle;
-        } else if(copybitDone) {
+        if(copybitDone) {
             hnd = ctx->mCopyBit[dpy]->getCurrentRenderBuffer();
         }
 
-        if(hnd && !isYuvBuffer(hnd)) {
+        if(hnd) {
             if (!ctx->mFBUpdate[dpy]->draw(ctx, hnd)) {
                 ALOGE("%s: FBUpdate::draw fail!", __FUNCTION__);
                 ret = -1;

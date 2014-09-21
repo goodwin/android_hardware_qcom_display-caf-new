@@ -17,6 +17,7 @@
  * limitations under the License.
 */
 
+#include <math.h>
 #include "overlayUtils.h"
 #include "overlayRotator.h"
 #include "gr.h"
@@ -34,10 +35,18 @@ MdpRot::~MdpRot() { close(); }
 
 bool MdpRot::enabled() const { return mRotImgInfo.enable; }
 
-void MdpRot::setRotations(uint32_t r) { mRotImgInfo.rotations = r; }
+void MdpRot::setRotations(uint32_t r) { mRotImgInfo.rotations = (uint8_t)r; }
+
+int MdpRot::getSrcMemId() const {
+    return mRotDataInfo.src.memory_id;
+}
 
 int MdpRot::getDstMemId() const {
     return mRotDataInfo.dst.memory_id;
+}
+
+uint32_t MdpRot::getSrcOffset() const {
+    return mRotDataInfo.src.offset;
 }
 
 uint32_t MdpRot::getDstOffset() const {
@@ -146,7 +155,6 @@ bool MdpRot::commit() {
             mRotImgInfo.enable = 0;
             return false;
         }
-        save();
         mRotDataInfo.session_id = mRotImgInfo.session_id;
     }
     return true;
@@ -237,7 +245,10 @@ void MdpRot::reset() {
 }
 
 bool MdpRot::queueBuffer(int fd, uint32_t offset) {
-    if(enabled()) {
+    if(enabled() and (not isRotCached(fd,offset))) {
+        int prev_fd = getSrcMemId();
+        uint32_t prev_offset = getSrcOffset();
+
         mRotDataInfo.src.memory_id = fd;
         mRotDataInfo.src.offset = offset;
 
@@ -248,14 +259,17 @@ bool MdpRot::queueBuffer(int fd, uint32_t offset) {
 
         mRotDataInfo.dst.offset =
                 mMem.mRotOffset[mMem.mCurrIndex];
-        mMem.mCurrIndex =
-                (mMem.mCurrIndex + 1) % mMem.mem.numBufs();
 
         if(!overlay::mdp_wrapper::rotate(mFd.getFD(), mRotDataInfo)) {
             ALOGE("MdpRot failed rotate");
             dump();
+            mRotDataInfo.src.memory_id = prev_fd;
+            mRotDataInfo.src.offset = prev_offset;
             return false;
         }
+        save();
+        mMem.mCurrIndex =
+                (mMem.mCurrIndex + 1) % mMem.mem.numBufs();
     }
     return true;
 }
@@ -272,6 +286,37 @@ void MdpRot::dump() const {
 void MdpRot::getDump(char *buf, size_t len) const {
     ovutils::getDump(buf, len, "MdpRotCtrl", mRotImgInfo);
     ovutils::getDump(buf, len, "MdpRotData", mRotDataInfo);
+}
+
+int MdpRot::getDownscaleFactor(const int& src_w, const int& src_h,
+        const int& dst_w, const int& dst_h, const uint32_t& /*mdpFormat*/,
+        const bool& /*isInterlaced*/) {
+    int dscale_factor = utils::ROT_DS_NONE;
+    // We need this check to engage the rotator whenever possible to assist MDP
+    // in performing video downscale.
+    // This saves bandwidth and avoids causing the driver to make too many panel
+    // -mode switches between BLT (writeback) and non-BLT (Direct) modes.
+    // Use-case: Video playback [with downscaling and rotation].
+    if (dst_w && dst_h)
+    {
+        float fDscale =  (float)(src_w * src_h) / (float)(dst_w * dst_h);
+        uint32_t dscale = (int)sqrtf(fDscale);
+
+        if(dscale < 2) {
+            // Down-scale to > 50% of orig.
+            dscale_factor = utils::ROT_DS_NONE;
+        } else if(dscale < 4) {
+            // Down-scale to between > 25% to <= 50% of orig.
+            dscale_factor = utils::ROT_DS_HALF;
+        } else if(dscale < 8) {
+            // Down-scale to between > 12.5% to <= 25% of orig.
+            dscale_factor = utils::ROT_DS_FOURTH;
+        } else {
+            // Down-scale to <= 12.5% of orig.
+            dscale_factor = utils::ROT_DS_EIGHTH;
+        }
+    }
+    return dscale_factor;
 }
 
 } // namespace overlay

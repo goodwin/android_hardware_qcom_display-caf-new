@@ -29,7 +29,9 @@
 #include <gralloc_priv.h>
 #include <utils/String8.h>
 #include "qdMetaData.h"
+#include "mdp_version.h"
 #include <overlayUtils.h>
+#include <overlayRotator.h>
 #include <EGL/egl.h>
 
 
@@ -118,7 +120,6 @@ struct ListStats {
     //Video specific
     int yuvCount;
     int yuvIndices[MAX_NUM_APP_LAYERS];
-    int extOnlyLayerIndex;
     bool preMultipliedAlpha;
     int yuv4k2kIndices[MAX_NUM_APP_LAYERS];
     int yuv4k2kCount;
@@ -129,6 +130,11 @@ struct ListStats {
     bool isSecurePresent;
     hwc_rect_t lRoi;  //left ROI
     hwc_rect_t rRoi;  //right ROI. Unused in single DSI panels.
+    //App Buffer Composition index
+    int  renderBufIndexforABC;
+    // Secure RGB specific
+    int secureRGBCount;
+    int secureRGBIndices[MAX_NUM_APP_LAYERS];
 };
 
 //PTOR Comp info
@@ -158,8 +164,8 @@ struct VsyncState {
 };
 
 struct BwcPM {
-    static void setBwc(const hwc_rect_t& crop,
-            const hwc_rect_t& dst, const int& transform,
+    static void setBwc(const hwc_rect_t& crop, const hwc_rect_t& dst,
+            const int& transform, const int& downscale,
             ovutils::eMdpFlags& mdpFlags);
 };
 
@@ -187,7 +193,6 @@ enum {
 class LayerRotMap {
 public:
     LayerRotMap() { reset(); }
-    enum { MAX_SESS = 3 };
     void add(hwc_layer_1_t* layer, overlay::Rotator *rot);
     //Resets the mapping of layer to rotator
     void reset();
@@ -197,10 +202,11 @@ public:
     uint32_t getCount() const;
     hwc_layer_1_t* getLayer(uint32_t index) const;
     overlay::Rotator* getRot(uint32_t index) const;
+    bool isRotCached(uint32_t index) const;
     void setReleaseFd(const int& fence);
 private:
-    hwc_layer_1_t* mLayer[MAX_SESS];
-    overlay::Rotator* mRot[MAX_SESS];
+    hwc_layer_1_t* mLayer[overlay::RotMgr::MAX_ROT_SESS];
+    overlay::Rotator* mRot[overlay::RotMgr::MAX_ROT_SESS];
     uint32_t mCount;
 };
 
@@ -268,6 +274,7 @@ int hwc_vsync_control(hwc_context_t* ctx, int dpy, int enable);
 int getBlending(int blending);
 bool isGLESOnlyComp(hwc_context_t *ctx, const int& dpy);
 void reset_layer_prop(hwc_context_t* ctx, int dpy, int numAppLayers);
+bool isAbcInUse(hwc_context_t *ctx);
 
 bool canUseMDPforVirtualDisplay(hwc_context_t* ctx,
                                 const hwc_display_contents_1_t *list);
@@ -348,7 +355,7 @@ int configMdp(overlay::Overlay *ov, const ovutils::PipeArgs& parg,
 
 int configColorLayer(hwc_context_t *ctx, hwc_layer_1_t *layer, const int& dpy,
         ovutils::eMdpFlags& mdpFlags, ovutils::eZorder& z,
-        ovutils::eIsFg& isFg, const ovutils::eDest& dest);
+        const ovutils::eDest& dest);
 
 void updateSource(ovutils::eTransform& orient, ovutils::Whf& whf,
         hwc_rect_t& crop, overlay::Rotator *rot);
@@ -356,20 +363,20 @@ void updateSource(ovutils::eTransform& orient, ovutils::Whf& whf,
 //Routine to configure low resolution panels (<= 2048 width)
 int configureNonSplit(hwc_context_t *ctx, hwc_layer_1_t *layer, const int& dpy,
         ovutils::eMdpFlags& mdpFlags, ovutils::eZorder& z,
-        ovutils::eIsFg& isFg, const ovutils::eDest& dest,
+        const ovutils::eDest& dest,
         overlay::Rotator **rot);
 
 //Routine to configure high resolution panels (> 2048 width)
 int configureSplit(hwc_context_t *ctx, hwc_layer_1_t *layer, const int& dpy,
         ovutils::eMdpFlags& mdpFlags, ovutils::eZorder& z,
-        ovutils::eIsFg& isFg, const ovutils::eDest& lDest,
+        const ovutils::eDest& lDest,
         const ovutils::eDest& rDest, overlay::Rotator **rot);
 
 //Routine to split and configure high resolution YUV layer (> 2048 width)
 int configureSourceSplit(hwc_context_t *ctx, hwc_layer_1_t *layer,
         const int& dpy,
         ovutils::eMdpFlags& mdpFlags, ovutils::eZorder& z,
-        ovutils::eIsFg& isFg, const ovutils::eDest& lDest,
+        const ovutils::eDest& lDest,
         const ovutils::eDest& rDest, overlay::Rotator **rot);
 
 //On certain targets DMA pipes are used for rotation and they won't be available
@@ -383,6 +390,8 @@ bool canUseRotator(hwc_context_t *ctx, int dpy);
 int getLeftSplit(hwc_context_t *ctx, const int& dpy);
 
 bool isDisplaySplit(hwc_context_t* ctx, int dpy);
+
+int getRotDownscale(hwc_context_t *ctx, const hwc_layer_1_t *layer);
 
 // Set the GPU hint flag to high for MIXED/GPU composition only for
 // first frame after MDP to GPU/MIXED mode transition.
@@ -403,10 +412,11 @@ static inline bool isYuvBuffer(const private_handle_t* hnd) {
     return (hnd && (hnd->bufferType == BUFFER_TYPE_VIDEO));
 }
 
-// Returns true if the buffer is yuv
-static inline bool is4kx2kYuvBuffer(const private_handle_t* hnd) {
+// Returns true if the buffer is yuv and exceeds the mixer width
+static inline bool isYUVSplitNeeded(const private_handle_t* hnd) {
+    int maxMixerWidth = qdutils::MDPVersion::getInstance().getMaxMixerWidth();
     return (hnd && (hnd->bufferType == BUFFER_TYPE_VIDEO) &&
-            (hnd->width > 2048));
+            (hnd->width > maxMixerWidth));
 }
 
 // Returns true if the buffer is secure
@@ -425,11 +435,6 @@ static inline bool isCPURendered(const private_handle_t* hnd) {
 //Return true if buffer is marked locked
 static inline bool isBufferLocked(const private_handle_t* hnd) {
     return (hnd && (private_handle_t::PRIV_FLAGS_HWC_LOCK & hnd->flags));
-}
-
-//Return true if buffer is for external display only
-static inline bool isExtOnly(const private_handle_t* hnd) {
-    return (hnd && (hnd->flags & private_handle_t::PRIV_FLAGS_EXTERNAL_ONLY));
 }
 
 //Return true if the buffer is intended for Secure Display
@@ -495,14 +500,20 @@ enum eAnimationState{
     ANIMATION_STARTED,
 };
 
+enum eCompositionState {
+    COMPOSITION_STATE_MDP = 0,        // Set if composition type is MDP
+    COMPOSITION_STATE_GPU,            // Set if composition type is GPU or MIXED
+    COMPOSITION_STATE_IDLE_FALLBACK,  // Set if it is idlefallback
+};
+
 // Structure holds the information about the GPU hint.
 struct gpu_hint_info {
     // system level flag to enable gpu_perf_mode
     bool mGpuPerfModeEnable;
     // Stores the current GPU performance mode DEFAULT/HIGH
     bool mCurrGPUPerfMode;
-    // true if previous composition used GPU
-    bool mPrevCompositionGLES;
+    // Stores the compositon state GPU, MDP or IDLE_FALLBACK
+    bool mCompositionState;
     // Stores the EGLContext of current process
     EGLContext mEGLContext;
     // Stores the EGLDisplay of current process
@@ -580,6 +591,8 @@ struct hwc_context_t {
     // persist.hwc.enable_vds
     bool mVDSEnabled;
     struct gpu_hint_info mGPUHintInfo;
+    //App Buffer Composition
+    bool enableABC;
     // PTOR Info
     qhwc::PtorInfo mPtorInfo;
 };

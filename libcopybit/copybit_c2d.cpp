@@ -35,8 +35,6 @@
 
 #include <EGL/eglplatform.h>
 #include <cutils/native_handle.h>
-#include <cutils/ashmem.h>
-#include <linux/ashmem.h>
 #include <gralloc_priv.h>
 
 #include <copybit.h>
@@ -964,7 +962,7 @@ static void populate_buffer_info(struct copybit_image_t const *img, bufferInfo& 
 /* Function to get the required size for a particular format, inorder for C2D to perform
  * the blit operation.
  */
-static size_t get_size(const bufferInfo& info)
+static int get_size(const bufferInfo& info)
 {
     int size = 0;
     int w = info.width;

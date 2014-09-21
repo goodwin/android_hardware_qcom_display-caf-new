@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ifeq ($(TARGET_HAVE_NEW_GRALLOC),true)
+ifneq ($(TARGET_HAVE_NEW_GRALLOC),true)
 
 # Gralloc module
 LOCAL_PATH := $(call my-dir)

@@ -250,36 +250,6 @@ int getMdpOrient(eTransform rotation) {
     return retTrans;
 }
 
-int getDownscaleFactor(const int& src_w, const int& src_h,
-        const int& dst_w, const int& dst_h) {
-    int dscale_factor = utils::ROT_DS_NONE;
-    // We need this check to engage the rotator whenever possible to assist MDP
-    // in performing video downscale.
-    // This saves bandwidth and avoids causing the driver to make too many panel
-    // -mode switches between BLT (writeback) and non-BLT (Direct) modes.
-    // Use-case: Video playback [with downscaling and rotation].
-    if (dst_w && dst_h)
-    {
-        float fDscale =  (float)(src_w * src_h) / (float)(dst_w * dst_h);
-        uint32_t dscale = (int)sqrtf(fDscale);
-
-        if(dscale < 2) {
-            // Down-scale to > 50% of orig.
-            dscale_factor = utils::ROT_DS_NONE;
-        } else if(dscale < 4) {
-            // Down-scale to between > 25% to <= 50% of orig.
-            dscale_factor = utils::ROT_DS_HALF;
-        } else if(dscale < 8) {
-            // Down-scale to between > 12.5% to <= 25% of orig.
-            dscale_factor = utils::ROT_DS_FOURTH;
-        } else {
-            // Down-scale to <= 12.5% of orig.
-            dscale_factor = utils::ROT_DS_EIGHTH;
-        }
-    }
-    return dscale_factor;
-}
-
 void getDecimationFactor(const int& src_w, const int& src_h,
         const int& dst_w, const int& dst_h, uint8_t& horzDeci,
         uint8_t& vertDeci) {
@@ -287,15 +257,16 @@ void getDecimationFactor(const int& src_w, const int& src_h,
     vertDeci = 0;
     float horDscale = ceilf((float)src_w / (float)dst_w);
     float verDscale = ceilf((float)src_h / (float)dst_h);
+    qdutils::MDPVersion& mdpHw = qdutils::MDPVersion::getInstance();
 
     //Next power of 2, if not already
     horDscale = powf(2.0f, ceilf(log2f(horDscale)));
     verDscale = powf(2.0f, ceilf(log2f(verDscale)));
 
-    //Since MDP can do 1/4 dscale and has better quality, split the task
+    //Since MDP can do downscale and has better quality, split the task
     //between decimator and MDP downscale
-    horDscale /= 4.0f;
-    verDscale /= 4.0f;
+    horDscale /= (float)mdpHw.getMaxMDPDownscale();
+    verDscale /= (float)mdpHw.getMaxMDPDownscale();
 
     if((int)horDscale)
         horzDeci = (uint8_t)log2f(horDscale);
@@ -303,7 +274,7 @@ void getDecimationFactor(const int& src_w, const int& src_h,
     if((int)verDscale)
         vertDeci = (uint8_t)log2f(verDscale);
 
-    if(src_w > 2048) {
+    if(src_w > mdpHw.getMaxMixerWidth()) {
         //If the client sends us something > what a layer mixer supports
         //then it means it doesn't want to use split-pipe but wants us to
         //decimate. A minimum decimation of 2 will ensure that the width is
@@ -340,9 +311,9 @@ void getDump(char *buf, size_t len, const char *prefix,
         const mdp_overlay& ov) {
     char str[256] = {'\0'};
     snprintf(str, 256,
-            "%s id=%d z=%d fg=%d alpha=%d mask=%d flags=0x%x H.Deci=%d,"
+            "%s id=%d z=%d alpha=%d mask=%d flags=0x%x H.Deci=%d,"
             "V.Deci=%d\n",
-            prefix, ov.id, ov.z_order, ov.is_fg, ov.alpha,
+            prefix, ov.id, ov.z_order, ov.alpha,
             ov.transp_mask, ov.flags, ov.horz_deci, ov.vert_deci);
     strlcat(buf, str, len);
     getDump(buf, len, "\tsrc", ov.src);

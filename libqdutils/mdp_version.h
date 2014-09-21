@@ -57,13 +57,6 @@ enum mdp_version {
     MDSS_V5     = 500,
 };
 
-// chip variants have same major number and minor numbers usually vary
-// for e.g., MDSS_MDP_HW_REV_101 is 0x10010000
-//                                    1001       -  major number
-//                                        0000   -  minor number
-// 8x26 v1 minor number is 0000
-//      v2 minor number is 0001 etc..
-
 enum {
     MAX_DISPLAY_DIM = 2048,
 };
@@ -139,6 +132,8 @@ public:
     bool needsROIMerge() { return mPanelInfo.mNeedsROIMerge; }
     unsigned long getLowBw() { return mLowBw; }
     unsigned long getHighBw() { return mHighBw; }
+    bool isRotDownscaleEnabled() { return mRotDownscale; }
+    int getMaxMixerWidth() const { return mMaxMixerWidth; }
     bool isSrcSplit() const;
     bool isSrcSplitAlways() const;
     bool isRGBScalarSupported() const;
@@ -147,6 +142,7 @@ public:
     bool is8084();
     bool is8092();
     bool is8x16();
+    bool is8x39();
 
 private:
     bool updateSysFsInfo();
@@ -173,6 +169,8 @@ private:
     //Additional property on top of source split
     bool mSourceSplitAlways;
     bool mRGBHasNoScalar;
+    bool mRotDownscale;
+    uint32_t mMaxMixerWidth; //maximum x-res of a given mdss mixer.
 };
 }; //namespace qdutils
 #endif //INCLUDE_LIBQCOMUTILS_MDPVER

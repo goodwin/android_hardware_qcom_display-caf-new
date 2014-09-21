@@ -132,12 +132,6 @@ bool FBUpdateNonSplit::configure(hwc_context_t *ctx, hwc_display_contents_1 *lis
     bool ret = false;
     hwc_layer_1_t *layer = &list->hwLayers[list->numHwLayers - 1];
     if (LIKELY(ctx->mOverlay)) {
-        int extOnlyLayerIndex = ctx->listStats[mDpy].extOnlyLayerIndex;
-        // ext only layer present..
-        if(extOnlyLayerIndex != -1) {
-            layer = &list->hwLayers[extOnlyLayerIndex];
-            layer->compositionType = HWC_OVERLAY;
-        }
         overlay::Overlay& ov = *(ctx->mOverlay);
 
         ovutils::Whf info(mAlignedFBWidth, mAlignedFBHeight,
@@ -165,7 +159,6 @@ bool FBUpdateNonSplit::configure(hwc_context_t *ctx, hwc_display_contents_1 *lis
         }
 
         ovutils::eMdpFlags mdpFlags = ovutils::OV_MDP_BLEND_FG_PREMULT;
-        ovutils::eIsFg isFg = ovutils::IS_FG_OFF;
         ovutils::eZorder zOrder = static_cast<ovutils::eZorder>(fbZorder);
 
         hwc_rect_t sourceCrop = integerizeSourceCrop(layer->sourceCropf);
@@ -216,7 +209,7 @@ bool FBUpdateNonSplit::configure(hwc_context_t *ctx, hwc_display_contents_1 *lis
         //For the mdp, since either we are pre-rotating or MDP does flips
         orient = ovutils::OVERLAY_TRANSFORM_0;
         transform = 0;
-        ovutils::PipeArgs parg(mdpFlags, info, zOrder, isFg,
+        ovutils::PipeArgs parg(mdpFlags, info, zOrder,
                                static_cast<ovutils::eRotFlags>(rotFlags),
                                ovutils::DEFAULT_PLANE_ALPHA,
                                (ovutils::eBlending)
@@ -283,12 +276,6 @@ bool FBUpdateSplit::configure(hwc_context_t *ctx,
     bool ret = false;
     hwc_layer_1_t *layer = &list->hwLayers[list->numHwLayers - 1];
     if (LIKELY(ctx->mOverlay)) {
-        /*  External only layer present */
-        int extOnlyLayerIndex = ctx->listStats[mDpy].extOnlyLayerIndex;
-        if(extOnlyLayerIndex != -1) {
-            layer = &list->hwLayers[extOnlyLayerIndex];
-            layer->compositionType = HWC_OVERLAY;
-        }
         ovutils::Whf info(mAlignedFBWidth, mAlignedFBHeight,
                           ovutils::getMdpFormat(HAL_PIXEL_FORMAT_RGBA_8888,
                                                 mTileEnabled));
@@ -331,7 +318,6 @@ bool FBUpdateSplit::configure(hwc_context_t *ctx,
             ovutils::PipeArgs pargL(mdpFlags,
                                     info,
                                     zOrder,
-                                    ovutils::IS_FG_OFF,
                                     ovutils::ROT_FLAGS_NONE,
                                     ovutils::DEFAULT_PLANE_ALPHA,
                                     (ovutils::eBlending)
@@ -367,7 +353,6 @@ bool FBUpdateSplit::configure(hwc_context_t *ctx,
             ovutils::PipeArgs pargR(mdpFlagsR,
                                     info,
                                     zOrder,
-                                    ovutils::IS_FG_OFF,
                                     ovutils::ROT_FLAGS_NONE,
                                     ovutils::DEFAULT_PLANE_ALPHA,
                                     (ovutils::eBlending)
@@ -422,13 +407,6 @@ FBSrcSplit::FBSrcSplit(hwc_context_t *ctx, const int& dpy):
 bool FBSrcSplit::configure(hwc_context_t *ctx, hwc_display_contents_1 *list,
         hwc_rect_t fbUpdatingRect, int fbZorder) {
     hwc_layer_1_t *layer = &list->hwLayers[list->numHwLayers - 1];
-    int extOnlyLayerIndex = ctx->listStats[mDpy].extOnlyLayerIndex;
-    // ext only layer present..
-    if(extOnlyLayerIndex != -1) {
-        layer = &list->hwLayers[extOnlyLayerIndex];
-        layer->compositionType = HWC_OVERLAY;
-    }
-
     overlay::Overlay& ov = *(ctx->mOverlay);
 
     ovutils::Whf info(mAlignedFBWidth,
@@ -442,7 +420,6 @@ bool FBSrcSplit::configure(hwc_context_t *ctx, hwc_display_contents_1 *list,
     ovutils::PipeArgs parg(mdpFlags,
             info,
             zOrder,
-            ovutils::IS_FG_OFF,
             ovutils::ROT_FLAGS_NONE,
             ovutils::DEFAULT_PLANE_ALPHA,
             (ovutils::eBlending)
@@ -472,7 +449,7 @@ bool FBSrcSplit::configure(hwc_context_t *ctx, hwc_display_contents_1 *list,
     ovutils::eDest destR = ovutils::OV_INVALID;
 
     /*  Use 2 pipes IF
-        a) FB's width is > 2048 or
+        a) FB's width is > Mixer width or
         b) On primary, driver has indicated with caps to split always. This is
            based on an empirically derived value of panel height.
     */
@@ -481,7 +458,7 @@ bool FBSrcSplit::configure(hwc_context_t *ctx, hwc_display_contents_1 *list,
             qdutils::MDPVersion::getInstance().isSrcSplitAlways();
 
     if(((fbUpdatingRect.right - fbUpdatingRect.left) >
-            qdutils::MAX_DISPLAY_DIM) or
+            (int)qdutils::MDPVersion::getInstance().getMaxMixerWidth()) or
             primarySplitAlways) {
         destR = ov.getPipe(pipeSpecs);
         if(destR == ovutils::OV_INVALID) {

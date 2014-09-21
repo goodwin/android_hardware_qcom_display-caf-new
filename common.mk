@@ -1,5 +1,12 @@
 #Common headers
-common_includes := hardware/qcom/display-caf-new/libgralloc
+ifeq ($(TARGET_HAVE_NEW_GRALLOC),true)
+    common_includes := hardware/qcom/display-caf-new/libgralloc
+else
+common_includes := hardware/qcom/display-caf-new/libgralloc-compat
+ifneq ($(TARGET_NO_COMPAT_GRALLOC_PERFORM),true)
+    common_flags += -DCOMPAT_GRALLOC_PERFORM
+endif
+endif
 common_includes += hardware/qcom/display-caf-new/liboverlay
 common_includes += hardware/qcom/display-caf-new/libcopybit
 common_includes += hardware/qcom/display-caf-new/libqdutils
@@ -19,7 +26,7 @@ common_header_export_path := qcom/display-caf-new
 common_libs := liblog libutils libcutils libhardware
 
 #Common C flags
-common_flags := -DDEBUG_CALC_FPS -Wno-missing-field-initializers
+common_flags += -DDEBUG_CALC_FPS -Wno-missing-field-initializers
 #TODO: Add -Werror back once all the current warnings are fixed
 common_flags += -Wconversion -Wall
 

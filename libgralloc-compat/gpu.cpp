@@ -227,11 +227,9 @@ int gpu_context_t::gralloc_alloc_framebuffer_locked(int usage,
 
     // create a "fake" handle for it
     uintptr_t vaddr = uintptr_t(m->framebuffer->base);
-    // As GPU needs ION FD, the private handle is created
-    // using ION fd and ION flags are set
     private_handle_t* hnd = new private_handle_t(
         dup(m->framebuffer->fd), bufferSize,
-        private_handle_t::PRIV_FLAGS_USES_ION |
+        private_handle_t::PRIV_FLAGS_USES_PMEM |
         private_handle_t::PRIV_FLAGS_FRAMEBUFFER,
         BUFFER_TYPE_UI, m->fbFormat, m->info.xres,
         m->info.yres);
@@ -239,7 +237,7 @@ int gpu_context_t::gralloc_alloc_framebuffer_locked(int usage,
     // find a free slot
     for (uint32_t i=0 ; i<numBuffers ; i++) {
         if ((bufferMask & (1LU<<i)) == 0) {
-            m->bufferMask |= (uint32_t)(1LU<<i);
+            m->bufferMask |= (1LU<<i);
             break;
         }
         vaddr += bufferSize;

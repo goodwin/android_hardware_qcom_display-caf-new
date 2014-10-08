@@ -1,4 +1,4 @@
-ifeq ($(TARGET_QCOM_DISPLAY_VARIANT),caf-new)
+ifeq ($(call my-dir),$(call project-path-for,qcom-display))
 
 ifeq ($(TARGET_HAVE_NEW_GRALLOC),true)
     display-hals := libgralloc
